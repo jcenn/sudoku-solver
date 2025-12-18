@@ -1,10 +1,56 @@
 package main
 
+import "core:fmt"
+import "core:slice"
 WfcCell :: struct {
     collapsed_value: int,
     collapsed:bool,
     states: u16,
     possible_state_count: int
+}
+
+WfcChoice :: struct {
+    grid_state: [][]WfcCell,
+    cell_x:int,
+    cell_y:int,
+    possible_states: u16
+}
+
+WfcSolver :: struct {
+    grid: [][]WfcCell,
+    choices: [dynamic]WfcChoice
+}
+
+init_wfc_solver :: proc() -> ^WfcSolver {
+    solver := new(WfcSolver)
+    solver.choices = make([dynamic]WfcChoice)
+    solver.grid = make([][]WfcCell, 9)
+    for _, i in solver.grid
+    {
+        solver.grid[i] = make([]WfcCell, gridSize)
+        for &cell in solver.grid[i] {
+            cell.possible_state_count = 9
+            cell.collapsed = false
+            
+            for i in 1..=9{
+                add_possible_state(&cell, uint(i))
+            }
+        }
+    }
+    return solver
+}
+destroy_wfc_solver :: proc(solver: ^WfcSolver) {
+    // TODO: implement cleanup
+    // Tbh it's going to get cleaned automatically either way
+    free(solver)
+}
+
+rebuild_grid_from_choice :: proc(solver : ^WfcSolver, choice: WfcChoice){
+    for _, y in solver.grid {
+        for _, x in solver.grid[y] {
+            solver.grid[y][x] = choice.grid_state[y][x]
+        }
+    }
 }
 
 collapse_to_state :: proc(grid: [][]WfcCell, x, y: int, state: int){
@@ -38,6 +84,7 @@ has_state :: proc(cell: ^WfcCell, state: uint) -> bool {
     return (cell.states & (1 << state)) != 0
 }
 
+// if there's multiple states in the bitmask returns the lowest one
 state_to_int :: proc(state: u16) -> int {
     for i in 1..=9 {
         if (state & (1 << uint(i))) != 0 {
@@ -102,32 +149,58 @@ collapse_cell_state:: proc(wfc_grid: [][]WfcCell, x, y: int, state: uint){
     }
 }
 
-solve_iteration :: proc(wfc_grid: [][]WfcCell) -> bool{
+add_choice ::proc(solver: ^WfcSolver, cell_x, cell_y: int, states: u16){
+    choice := WfcChoice{
+        grid_state = [][]WfcCell{},
+        possible_states = states,
+        cell_x = cell_x,
+        cell_y = cell_y
+    }
+    choice.grid_state = make([][]WfcCell, len(solver.grid))
+    for row, i in solver.grid {
+        choice.grid_state[i] = slice.clone(row)
+    }
+    append(&solver.choices, choice)
+} 
+
+solve_iteration :: proc(solver: ^WfcSolver) -> bool{
     // find cell with lowest entropy
     cell: ^WfcCell = nil
+    min_states := 9
     min_x := 0
     min_y := 0
-    for row, y in wfc_grid {
+    for row, y in solver.grid{
         for &c, x in row {
-            if !c.collapsed && c.possible_state_count == 1 {
+            if !c.collapsed && c.possible_state_count == 0 {
+                // we reached a board state that's impossible to solve
+                // and we need to backtrack
+                return false
+            }
+            if !c.collapsed && c.possible_state_count <= min_states {
                 cell = &c
                 min_x = x
                 min_y = y
+                min_states = c.possible_state_count
             }
         }
     }
     if cell == nil {
+        // we finished filling all cells
+        // if there are choices stored in the list we have to check if our solution is correct
+        // and backtrack if it isn't
         return false
     }
     // x := min_x
     // y := min_y
+    if min_states == 1 {
+        collapse_to_state(solver.grid, min_x, min_y, state_to_int(cell.states))
+        return true
+    }
+    // we have more than 1 possible state for each cell and have to check all possible choices
+    picked_state := state_to_int(cell.states)
+    fmt.printfln("picked %d for %d %d", picked_state, min_x, min_y)
+    add_choice(solver, min_x, min_y, cell.states & ~(1 << uint(picked_state)))
+    collapse_to_state(solver.grid, min_x, min_y, picked_state)
 
-    collapse_to_state(wfc_grid, min_x, min_y, state_to_int(cell.states))
-    // propagate state change in cell's row, column and subgrid
-
-    // it will have 2 or more possible states
-    // we choose one and store information about that choice in a stack-like structure
-    // if we reach an unsolvable state we have to go back to last choice and pick another option
-    // if we run out of options it means the initial state was unsolvable
     return true
 }

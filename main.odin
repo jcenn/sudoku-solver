@@ -10,7 +10,7 @@ import rl "vendor:raylib"
 // [ ] Allow user to input numbers and collapse wfc state
 
 gridSize :: 9
-cellSize :: 50
+cellSize :: 80
 gridPaddingX :: 50
 gridPaddingY :: 50
 
@@ -23,8 +23,101 @@ GameState :: enum {
     Solved,
 }
 
+init_grid :: proc(solver: ^WfcSolver) {
+    collapse_to_state(solver.grid, 0, 0, 4)
+    collapse_to_state(solver.grid, 0, 1, 9)
+    collapse_to_state(solver.grid, 1, 1, 1)
+    collapse_to_state(solver.grid, 1, 2, 8)
+    collapse_to_state(solver.grid, 2, 2, 3)
+
+    collapse_to_state(solver.grid, 0, 5, 5)
+    collapse_to_state(solver.grid, 2, 5, 8)
+    
+    collapse_to_state(solver.grid, 1, 8, 7)
+    
+    collapse_to_state(solver.grid, 3, 0, 6)
+    collapse_to_state(solver.grid, 5, 0, 8)
+    collapse_to_state(solver.grid, 4, 1, 3)
+    collapse_to_state(solver.grid, 5, 1, 2)
+    collapse_to_state(solver.grid, 4, 2, 1)
+
+    collapse_to_state(solver.grid, 3, 3, 8)
+    collapse_to_state(solver.grid, 3, 4, 1)
+    collapse_to_state(solver.grid, 4, 5, 7)
+    collapse_to_state(solver.grid, 5, 5, 4)
+    
+    collapse_to_state(solver.grid, 4, 8, 9)
+    collapse_to_state(solver.grid, 5, 8, 6)
+
+    collapse_to_state(solver.grid, 6, 1, 8)
+    collapse_to_state(solver.grid, 8, 1, 6)
+    collapse_to_state(solver.grid, 8, 2, 2)
+
+    collapse_to_state(solver.grid, 6, 4, 3)
+    collapse_to_state(solver.grid, 8, 4, 5)
+
+    collapse_to_state(solver.grid, 8, 6, 8)
+    collapse_to_state(solver.grid, 6, 7, 2)
+    collapse_to_state(solver.grid, 6, 8, 4)
+    collapse_to_state(solver.grid, 8, 8, 3)
+}
 
 targetScreenHeight :: 800
+
+is_solved :: proc (solver: ^WfcSolver) -> bool{
+    // check wfc properties
+    for row in solver.grid {
+        for v in row {
+            if !v.collapsed && v.possible_state_count == 0 {
+                return false
+            }
+        }
+    }
+    
+    // check with sudoku rules
+    for row, y in solver.grid {
+        for cell, x in row {
+            // check row
+            for c, x2 in row {
+                if x == x2 {
+                    continue
+                }
+                if cell.collapsed_value == c.collapsed_value {
+                    return false
+                }
+            }
+            
+            // check column
+            for y2 in 0..<9 {
+                if y2 == y {
+                    continue
+                }
+                c := solver.grid[y2][x]
+
+                if cell.collapsed_value == c.collapsed_value {
+                    return false
+                }
+            }
+
+            // check sub_grid
+
+            subgridStartX := x/3
+            subgridStartY := y/3
+
+            for cell_y in (subgridStartY * 3)..<(subgridStartY * 3 + 3) {
+                for cell_x in (subgridStartX * 3)..<(subgridStartX * 3 + 3) {
+                    if cell_y == y && cell_x == x {
+                        continue
+                    }
+                    if solver.grid[cell_y][cell_x].collapsed_value == cell.collapsed_value {
+                        return false
+                    }
+                }
+            }
+        }
+    }
+    return true
+}
 
 main :: proc(){
     key_value_map := make(map[rl.KeyboardKey]int)
@@ -42,20 +135,15 @@ main :: proc(){
 
     current_state := GameState.Initial
 
-    wfc_grid := make([][]WfcCell, gridSize)
-    defer delete(wfc_grid)
+    wfc_solver := init_wfc_solver()
     
-    for _, i in wfc_grid
-    {
-        wfc_grid[i] = make([]WfcCell, gridSize)
-    }
     // cleanup of inner arrays
-    defer for _, i in wfc_grid
+    defer for _, i in wfc_solver.grid
     {
-        delete(wfc_grid[i])
+        delete(wfc_solver.grid[i])
     }
 
-    for row in wfc_grid {
+    for row in wfc_solver.grid {
         for &cell in row {
             cell.collapsed = false
             cell.possible_state_count = 0
@@ -65,6 +153,7 @@ main :: proc(){
             }
         }
     }
+    // init_grid(wfc_solver)
 
     rl.SetConfigFlags({.WINDOW_RESIZABLE})
     rl.InitWindow(800, 800, "sudoku solver")
@@ -91,7 +180,7 @@ main :: proc(){
                     if x < 0 || y < 0 || x >= 9 || y >= 9 {
                         continue
                     }
-                    collapse_to_state(wfc_grid, x, y, v)
+                    collapse_to_state(wfc_solver.grid, x, y, v)
                     break
                 }
             }
@@ -100,11 +189,43 @@ main :: proc(){
             }
             break
         case .Solving: 
-            res := solve_iteration(wfc_grid)
-            rl.WaitTime(0.5)
+            res := solve_iteration(wfc_solver)
+            // artificial delay for more interesting visual presentation
+            // rl.WaitTime(0.2)
             if res == false {
-                fmt.println("Couldn't solve")
-                current_state = .Solved
+                // check if solved
+                if is_solved(wfc_solver) {
+                    // we cooked
+                    fmt.println("We cooked")
+                    current_state = .Solved
+                    break
+                }
+
+                choice_count := len(wfc_solver.choices)
+                if choice_count == 0 {
+                    // we're cooked
+                    fmt.println("Couldn't solve")
+                    current_state = .Solved
+                    break
+                }else{
+                    // backtrack
+                    fmt.printfln("Backtracking: choices left %d", len(wfc_solver.choices))
+                    choice := &wfc_solver.choices[choice_count-1]
+                    picked_state := state_to_int(choice.possible_states)
+                    
+                    choice.possible_states &= ~(1 << uint(picked_state))
+
+                    cell_x := choice.cell_x
+                    cell_y := choice.cell_y
+                    fmt.printfln("backtracked and picked %d for %d %d ", picked_state, cell_x, cell_y)
+                    rebuild_grid_from_choice(wfc_solver, choice^)
+                    
+
+                    if choice.possible_states == 0 {
+                        pop(&wfc_solver.choices)
+                    }
+                    collapse_to_state(wfc_solver.grid, cell_x, cell_y, picked_state)
+                }
             }
 
             break
@@ -114,7 +235,7 @@ main :: proc(){
         }
         rl.BeginDrawing()
 
-        for row, y in wfc_grid {
+        for row, y in wfc_solver.grid {
             for cell, x in row {
                 if cell.collapsed {
                     draw_cell_value(x, y, int(cell.collapsed_value))
@@ -145,11 +266,17 @@ world_to_cell :: proc(pos: rl.Vector2) -> rl.Vector2{
 draw_cell_value :: proc(x, y: int, value: int){
     builder := strings.builder_make()
     defer strings.builder_destroy(&builder)
-    strings.write_int(&builder, value, 10)
     if value < 0 {
-        rl.DrawText(strings.to_cstring(&builder), i32(x * cellSize + gridPaddingX) + cellSize/2, i32(y * cellSize + gridPaddingY) + cellSize/2, 20, rl.GREEN)
+        strings.write_int(&builder, -value, 10)
     }else {
-        rl.DrawText(strings.to_cstring(&builder), i32(x * cellSize + gridPaddingX) + cellSize/2, i32(y * cellSize + gridPaddingY) + cellSize/2, 20, rl.BLACK)
+        strings.write_int(&builder, value, 10)
+    }
+    if value < 0 {
+        rl.DrawText(strings.to_cstring(&builder), i32(x * cellSize + gridPaddingX) + cellSize/2, i32(y * cellSize + gridPaddingY) + cellSize/2, 20, rl.LIGHTGRAY)
+    }else if value == 0 {
+        rl.DrawText(strings.to_cstring(&builder), i32(x * cellSize + gridPaddingX) + cellSize/2, i32(y * cellSize + gridPaddingY) + cellSize/2, 20, rl.RED)
+    }else {
+        rl.DrawText(strings.to_cstring(&builder), i32(x * cellSize + gridPaddingX) + 35, i32(y * cellSize + gridPaddingY) + 30 , 28, rl.BLACK)
     }
 }
 
