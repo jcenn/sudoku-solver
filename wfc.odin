@@ -7,16 +7,18 @@ WfcCell :: struct {
     possible_state_count: int
 }
 
-// for assigning initial values to cells
-// won't check if value is legal
-// won't propagate to other cells
-collapse_to_state :: proc(grid: [][]WfcCell, x, y: int, value: int){
+collapse_to_state :: proc(grid: [][]WfcCell, x, y: int, state: int){
+    // tried to assign invalid state to this cell
+    if !has_state(&grid[y][x], uint(state)) {
+        return
+    }
     for i in 1..=9 {
-        if i == value {
+        if i == state {
             continue
         }
         collapse_cell_state(grid, x, y, uint(i))
     }
+    grid[y][x].collapsed = true
 }
 
 add_possible_state :: proc(cell: ^WfcCell, state: uint){
@@ -59,17 +61,11 @@ collapse_cell_state:: proc(wfc_grid: [][]WfcCell, x, y: int, state: uint){
     cell.states &= ~(1 << state)
     cell.possible_state_count -= 1
     if cell.possible_state_count == 1 {
-        cell.collapsed = true
         cell.collapsed_value = state_to_int(cell.states)
     }
 
-    // TODO: not sure about this one
-    if !cell.collapsed {
-        return
-    }
-
-    // TODO: propagate state change in cell's row, column and subgrid
     collapsed_state := uint(cell.collapsed_value)
+    // collapse_to_state(wfc_grid, x, y, state_to_int(cell.states))
     // row
     for &cell, cell_x in wfc_grid[y]{
         if cell_x != x && !cell.collapsed && has_state(&cell, collapsed_state) {
@@ -106,11 +102,32 @@ collapse_cell_state:: proc(wfc_grid: [][]WfcCell, x, y: int, state: uint){
     }
 }
 
-solve_iteration :: proc(wfc_grid: [][]WfcCell) {
+solve_iteration :: proc(wfc_grid: [][]WfcCell) -> bool{
     // find cell with lowest entropy
+    cell: ^WfcCell = nil
+    min_x := 0
+    min_y := 0
+    for row, y in wfc_grid {
+        for &c, x in row {
+            if !c.collapsed && c.possible_state_count == 1 {
+                cell = &c
+                min_x = x
+                min_y = y
+            }
+        }
+    }
+    if cell == nil {
+        return false
+    }
+    // x := min_x
+    // y := min_y
+
+    collapse_to_state(wfc_grid, min_x, min_y, state_to_int(cell.states))
+    // propagate state change in cell's row, column and subgrid
 
     // it will have 2 or more possible states
     // we choose one and store information about that choice in a stack-like structure
     // if we reach an unsolvable state we have to go back to last choice and pick another option
     // if we run out of options it means the initial state was unsolvable
+    return true
 }

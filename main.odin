@@ -87,8 +87,10 @@ main :: proc(){
                     if y < 0 || y >= gridSize {
                         break
                     }
-                    fmt.printfln("pressed on %.f, %.f", clicked_cell.x, clicked_cell.y)
                     // TODO: check bounds
+                    if x < 0 || y < 0 || x >= 9 || y >= 9 {
+                        continue
+                    }
                     collapse_to_state(wfc_grid, x, y, v)
                     break
                 }
@@ -98,8 +100,12 @@ main :: proc(){
             }
             break
         case .Solving: 
-            rl.WaitTime(1.0)
-            solve_iteration(wfc_grid)
+            res := solve_iteration(wfc_grid)
+            rl.WaitTime(0.5)
+            if res == false {
+                fmt.println("Couldn't solve")
+                current_state = .Solved
+            }
 
             break
         case .Solved: 
